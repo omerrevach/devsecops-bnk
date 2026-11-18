@@ -1,8 +1,59 @@
-# Hardened Enterprise Pipeline — internal banking service
+# Hardened Enterprise Pipeline: internal banking service
+
+## The assignment
+
+Build a Git repository from scratch with a secure, automated CI/CD pipeline for an internal banking service,
+under two constraints:
+
+- **No outbound internet.** CI runners work in an isolated network with no access to public repositories or
+  vulnerability feeds while they run.
+- **Domain isolation.** The runners sit in a different zone than production, and direct connections from the
+  runners into production (SSH, WinRM) are blocked.
+
+What was asked:
+
+1. **Application and SCA.** A small web service (under 50 lines) with a database connection and a health check,
+   whose dependencies include a known High/Critical CVE. An offline dependency scanner that fails the pipeline on
+   Critical findings, plus a clean, auditable way to accept one specific CVE in an emergency.
+2. **IaC and scanning.** Infrastructure as code for the runtime (workloads, network rules, configuration), hardened
+   to limit the blast radius, and scanned by an IaC scanner before anything is deployed.
+3. **Cross-domain deployment.** Since CI cannot push into production, a pull-based (GitOps) design, with the
+   integrity of every artifact verifiable between the zones.
+4. **DECISIONS.md.** Short answers on stale vulnerability feeds, deploying to legacy AD-joined servers, and
+   handling an unpatched dependency.
+
+## Architecture: the flow
+
+```mermaid
+flowchart LR
+  DEV["Developer"] -->|"1 push branch,<br/>open merge request"| GL
+  subgraph BUILD["Build zone (no internet)"]
+    GL["GitLab<br/>code · reviews · CI"]
+    BR["Build runner<br/>scan · build · scan image"]
+    RR["Release runner<br/>sign with KMS"]
+  end
+  SEC["Security"] -->|"2 approve, merge,<br/>approve release"| GL
+  GL --> BR
+  GL --> RR
+  BR -->|"3 push image"| STG
+  RR -->|"4 sign"| KMS["AWS KMS key"]
+  RR -->|"5 publish signed<br/>image + chart"| REL
+  subgraph DMZ["DMZ"]
+    STG["Harbor staging"]
+    REL["Harbor release<br/>signed only"]
+    MIR["Harbor mirror<br/>pinned tools + CVE DB"]
+  end
+  MIR -->|"daily, via egress proxy"| NET["Public registries"]
+  BR -.->|"tools + CVE DB"| MIR
+  subgraph PROD["Prod zone (no inbound)"]
+    FLUX["Flux"] --> APP["bank-app + Postgres<br/>on k3s"]
+  end
+  FLUX -->|"6 pull + verify signature"| REL
+```
 
 A secure CI/CD pipeline for a small banking service. CI and production have **no internet**, every
 dependency is checked, every release is **signed** and approved by a person, and production **pulls**
-releases itself — nothing ever pushes into it. The whole lab comes up with one command, `make up`, and every
+releases itself. Nothing ever pushes into it. The whole lab comes up with one command, `make up`, and every
 security control has a negative test that proves it blocks what it should (`make test`, `make test-lab`).
 
 ## How it works
@@ -19,7 +70,7 @@ security control has a negative test that proves it blocks what it should (`make
 5. **A Critical CVE stops the pipeline.** The only way through is a merge request adding a short, documented
    exception for that one CVE in that one package version. Only Security can merge it, and the pipeline checks
    GitLab's record that Security really approved it.
-6. **The images are built and scanned again** — the app image and the database image the release uses.
+6. **The images are built and scanned again**: the app image and the database image the release uses.
 7. **Only `main` can be released, only by a person.** The **release runner** signs the image with a key in
    **AWS KMS** (the key never leaves KMS). The pipeline then waits for Security to press **promote**.
 8. **Re-checked, then published.** After the approval, exceptions, approvals, database freshness and a rescan of
@@ -59,7 +110,7 @@ Harbor is the only bridge: CI writes to it, prod reads from it.
 | sign | `sign-image` | `main` only, on the release runner: signs with the KMS key. |
 | release | `promote` (manual), `release-check`, `release-policy`, `publish-image`, `publish-chart`, `sign-chart` | Security approves; everything that can expire is re-checked; the signed image, its signed evidence and the signed chart go to Harbor `release`. |
 
-**Branch vs `main`:** a merge request pipeline only checks, builds and scans — it has no signing or release jobs.
+**Branch vs `main`:** a merge request pipeline only checks, builds and scans. It has no signing or release jobs.
 After merging, `main` runs everything again on the exact merged code, signs it, and waits for the manual release.
 
 ### What the demo shows (step by step)
@@ -190,7 +241,7 @@ Each point says what is enforced and how it is proven. Local tests: `make test` 
   key that lets each role decrypt only its own paths. *(test-lab: IAM policy simulation)*
 - Only the release runner's role can use the signing key, and only for `main`. *(test-lab)*
 - The lab's AWS user can create roles only with a **permissions boundary** it cannot remove, and can pass roles
-  only to EC2 — so it cannot turn a role into an administrator. *(test-lab: escalation paths denied)*
+  only to EC2, so it cannot turn a role into an administrator. *(test-lab: escalation paths denied)*
 - **Flux least privilege:** its default cluster-admin binding is removed; it installs the app only by
   impersonating one service account that has rights in the `bank-app` namespace for the chart's resource kinds;
   anything else gets no permissions. *(test-lab: `kubectl auth can-i`)*
