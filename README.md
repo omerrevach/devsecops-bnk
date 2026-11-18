@@ -1,5 +1,19 @@
 # Hardened Enterprise Pipeline: internal banking service
 
+**Contents**
+
+1. [The assignment](#the-assignment)
+2. [Architecture: the flow](#architecture-the-flow)
+3. [How it works](#how-it-works)
+4. [The pipeline](#the-pipeline)
+5. [What the demo shows, with screenshots](#what-the-demo-shows-step-by-step)
+6. [Security considerations](#security-considerations)
+7. [Tools and why](#tools-and-why)
+8. [Users](#users)
+9. [Repository layout, and what would differ in a real company](#repository-layout-and-what-would-differ-in-a-real-company)
+10. [Known gaps](#known-gaps)
+11. [Run it yourself: set up, log in, check everything](#run-it-yourself-set-up-log-in-check-everything)
+
 ## The assignment
 
 Build a Git repository from scratch with a secure, automated CI/CD pipeline for an internal banking service,
@@ -26,52 +40,51 @@ What was asked:
 
 ```mermaid
 flowchart LR
-  DEV["Developer / Security<br/>(laptop)"]
-  REG["Public registries<br/>ghcr.io · Docker Hub · quay.io · gcr.io · cgr.dev"]
+  DEV["Developer<br/>and Security<br/>(laptop)"]
   subgraph AWS["AWS account · eu-central-1"]
-    subgraph VPC["VPC 10.20.0.0/16 · no NAT gateway · subnet firewalls (NACLs) between zones"]
-      subgraph VPNS["vpn subnet 10.20.50.0/24"]
+    subgraph VPC["VPC 10.20.0.0/16 · no NAT gateway · subnet firewalls between zones"]
+      subgraph VPNS["vpn subnet<br/>10.20.50.0/24"]
         CVPN["Client VPN<br/>certificate login"]
       end
-      subgraph PUB["public subnet 10.20.0.0/24"]
-        PROXY["Squid egress proxy<br/>domain allowlist, logged"]
-      end
-      subgraph DMZ["dmz subnets 10.20.20.0/24 + 10.20.21.0/24"]
-        ALB["Internal load balancer<br/>gitlab. / harbor.lab.internal · TLS"]
-        HARBOR["Harbor<br/>mirror · staging · release (signed only)"]
+      subgraph DMZA["dmz subnets<br/>10.20.20.0/24 + .21.0/24"]
+        ALB["Internal load balancer<br/>TLS · per-host allowlist"]
       end
       subgraph BUILD["build subnet 10.20.10.0/24 · no internet"]
-        GL["GitLab<br/>code · reviews · CI · PyPI registry"]
-        BR["Build runner<br/>scans · builds"]
-        RR["Release runner<br/>only main · only one that can sign"]
+        GL["GitLab<br/>code · reviews · CI"]
+        BR["Build runner<br/>scan · build"]
+        RR["Release runner<br/>main only · signs"]
       end
-      subgraph PROD["prod subnet 10.20.30.0/24 · no inbound"]
-        K3S["k3s: Flux → bank-app + Postgres"]
-      end
-      subgraph EPS["endpoints subnet 10.20.40.0/24"]
+      subgraph EPS["endpoints subnet<br/>10.20.40.0/24"]
         VPCE["VPC endpoints<br/>SSM · KMS"]
       end
+      subgraph DMZB["dmz subnets (registry)"]
+        HARBOR["Harbor<br/>staging · release (signed only) · mirror"]
+      end
+      subgraph PUB["public subnet<br/>10.20.0.0/24"]
+        PROXY["Egress proxy<br/>allowlist, logged"]
+      end
+      subgraph PROD["prod subnet 10.20.30.0/24 · no inbound"]
+        K3S["k3s<br/>Flux → bank-app + Postgres"]
+      end
     end
-    KMS["KMS signing key"]
-    PS["Parameter Store<br/>secrets, per-VM access"]
+    KMS["KMS<br/>signing key"]
   end
+  REG["Public registries"]
 
-  DEV -->|"1 VPN"| CVPN --> ALB
-  ALB --> GL
-  ALB --> HARBOR
+  DEV -->|"1 VPN"| CVPN --> ALB -->|"web UI, git"| GL
   GL -->|"2 jobs"| BR
   GL -->|"2 jobs (main)"| RR
-  BR -->|"3 image to staging"| ALB
-  RR -->|"4 sign digest"| VPCE --> KMS
-  RR -->|"5 signed image + chart to release"| ALB
-  K3S -->|"6 pull + verify signature (Harbor only)"| ALB
+  BR -->|"3 image to staging"| HARBOR
+  RR -->|"4 sign"| VPCE --> KMS
+  RR -->|"5 signed release"| HARBOR
+  HARBOR -->|"6 Flux pulls + verifies"| K3S
   HARBOR -->|"daily mirror"| PROXY --> REG
-  VPCE --> PS
 ```
 
-Arrows start at whoever opens the connection. Nothing connects into prod: it only pulls signed releases from
-Harbor through the load balancer, which lets prod reach Harbor but never GitLab. Shells on the servers go through
-AWS SSM (no SSH), and secrets live in Parameter Store, each server able to read only its own.
+How to read it: the arrows follow a release from left to right. Two details the drawing keeps simple: the runners
+and prod also reach Harbor through the internal load balancer (which lets prod reach Harbor but never GitLab), and
+step 6 is a **pull**: prod opens the connection, nothing connects into prod. Shells on the servers go through AWS
+SSM (no SSH), and secrets live in Parameter Store, each server able to read only its own.
 
 A secure CI/CD pipeline for a small banking service. CI and production have **no internet**, every
 dependency is checked, every release is **signed** and approved by a person, and production **pulls**
@@ -335,22 +348,64 @@ Each point says what is enforced and how it is proven. Local tests: `make test` 
 | Flux `bank-app-deployer` | Installs the app, only in its namespace. |
 | Postgres `postgres` / `bank_app` | Admin (only inside the database pod) / the app's normal login. |
 
-## Run it
+## Repository layout, and what would differ in a real company
 
-```bash
-bash scripts/create-lab-user.sh   # once, as an AWS administrator (e.g. CloudShell): user + boundary
-cp lab.env.example lab.env        # AWS profile, region; DEMO=manual to click through the demo yourself
-make up                           # checks, then builds everything (~15 min, ~26 with DEMO=auto)
-make passwords                    # logins
-make vpn                          # VPN profile, then open https://gitlab.lab.internal and https://harbor.lab.internal
-make status                       # what is running in prod
-make test                         # local negative tests (no AWS)
-make test-lab                     # negative tests against the running lab
-make down                         # delete everything
+```
+terraform/     the AWS lab (network, servers, load balancer, VPN, KMS)       -> scanned by CI, applied by make up
+app/           the banking service, its pinned dependencies, its Dockerfile   -> built and scanned by CI
+charts/        the Helm chart: how the app runs in Kubernetes                 -> scanned, signed and published by CI
+platform/      setup scripts per server, plus the Flux config for prod        -> run by make up
+scripts/       the pipeline's gate scripts, and the lab automation            -> CI jobs and make up
+security/      the CVE exceptions file                                         -> read by every vulnerability scan
+tests/         negative tests that prove each control                         -> make test, make test-lab
 ```
 
-Needs: AWS CLI v2 (+ Session Manager plugin), Terraform ≥ 1.11, Checkov, Docker (for `make test`), `jq`, `git`,
-`openssl`, `make`. Details for every step: `BUILD_GUIDE.md`. Trade-off decisions: `DECISIONS.md`.
+**One repository is a choice for the assignment.** In a real company:
+
+- **Terraform** would live in its **own infrastructure repo**, with its own pipeline (plan, review, apply by a
+  dedicated identity) and its own owners. Here the Terraform is the lab and part of the deliverable, and CI only
+  scans it (it never applies it), so one repo keeps the assignment easy to review.
+- **The Helm chart** would usually stay **with the app**, owned by the team that builds the app, so a code change
+  and its deployment change are reviewed and released together (as here). What would move out is the
+  **environment configuration**: the Flux objects that say "prod runs `bank-app` from Harbor, verified with this
+  key" (`platform/flux/` here) would live in a separate **GitOps repo** per environment, owned by the platform
+  team, so who may deploy where is controlled separately from the application code. Shared building blocks
+  (a common chart library, policies) would come from a platform repo or chart registry.
+- **The scripts** in `platform/` exist so the whole lab can be built and torn down in one command for the home
+  assignment. In production these servers would be built from hardened images (e.g. Packer) and managed
+  services or configuration management (e.g. Ansible), not one-off scripts.
+
+### What the scripts do
+
+**Lab setup (run from the laptop by `make up`, never in CI)**
+
+| Script | What it does |
+|---|---|
+| `scripts/lab.sh` | The orchestrator behind every `make` command: checks Terraform, applies it, then runs the steps below in order |
+| `scripts/ssm-run.sh` | Runs a script on a server through AWS SSM (no SSH); secrets never pass through it |
+| `scripts/create-lab-user.sh` | One-time admin setup: the AWS user and its permissions boundary |
+| `platform/gitlab/` | Install GitLab; configure users, groups, project, CI variables and runners; take Python packages in; import the code; the scripted demo |
+| `platform/harbor/` | Install Harbor; configure projects, the pinned mirror (`mirror.txt`) and robot accounts |
+| `platform/runner/` | Install and register the two CI runners; stop them during maintenance and prove they have no internet |
+| `platform/prod/` | Install k3s and Flux; check the exact release is running; the cluster security tests |
+| `platform/proxy/` | Open and close the installers' temporary internet allowlist |
+
+**Pipeline gates (run by the CI jobs)**
+
+| Script | Job | What it does |
+|---|---|---|
+| `feed-check.sh` | every Trivy job | Stops if the vulnerability database is stale, missing or dated in the future |
+| `trivy-scan.sh` | `sca`, `image-scan`, `release-check` | Full report, a test report for GitLab, then the Critical gate |
+| `iac-scan.sh` | `iac-terraform`, `iac-k8s` | Checkov for one framework; fails if it scanned nothing |
+| `check_exceptions.py` | `exceptions-lint`, `release-policy` | Strict exception format and expiry |
+| `check_exception_approval.py` | `exception-approvals`, `release-policy` | Proves Security approved the exception, from GitLab's records |
+| `release-evidence.py` | `release-policy` | Builds the release evidence record that gets signed |
+| `render-chart.sh`, `chart-image.sh` | `chart-lint`, `image-scan` | Renders the chart for scanning; reads the database image from the chart |
+
+**Why every pipeline runs every scan.** A release must prove the whole repository is clean with today's
+vulnerability database, because new CVEs appear daily even when the code does not change, and "only run when
+this folder changed" rules can silently skip a gate. The scans take seconds to a minute. In a bigger setup,
+merge requests could skip unrelated scans while `main` still runs everything before a release.
 
 ## Known gaps
 
@@ -369,3 +424,54 @@ Needs: AWS CLI v2 (+ Session Manager plugin), Terraform ≥ 1.11, Checkov, Docke
   privileged); production would build on dedicated, short-lived build VMs.
 - **Scripted demo.** `DEMO=auto` approves with the approvers' API tokens; it demonstrates the flow but is not
   evidence of independent human review.
+
+## Run it yourself: set up, log in, check everything
+
+**1. Requirements (laptop).** AWS CLI v2 with the Session Manager plugin, Terraform 1.11 or newer, Checkov, Docker,
+`jq`, `git`, `openssl`, `make`, and an OpenVPN client (Linux: `network-manager-openvpn`; macOS/Windows: AWS VPN Client).
+
+**2. AWS access, once.** In a dedicated AWS account, as an administrator (AWS CloudShell is easiest):
+```bash
+bash scripts/create-lab-user.sh      # IAM user bank-lab-admin with a permissions boundary, CLI profile "bank-lab"
+```
+
+**3. Settings.**
+```bash
+cp lab.env.example lab.env           # set AWS_PROFILE, AWS_REGION; DEMO=manual to do the demo yourself
+```
+
+**4. Build everything (about 15 minutes, 26 with DEMO=auto).**
+```bash
+make up
+```
+
+**5. Log in.**
+```bash
+make passwords                       # GitLab: root, omeriko (developer), security-lead (Security) · Harbor: admin
+make vpn                             # writes bank-lab.ovpn and prints how to import and connect it
+terraform -chdir=terraform output -raw ca_cert_pem > lab-ca.crt
+```
+Connect the VPN, import `lab-ca.crt` in your browser as a trusted authority (Chrome: Settings, Privacy and
+security, Security, Manage certificates, Authorities, Import. Firefox: Settings, Privacy & Security, View
+Certificates, Authorities, Import), then open:
+- GitLab: **https://gitlab.lab.internal** (use a private window for `security-lead` to stay logged in as both)
+- Harbor: **https://harbor.lab.internal**
+
+**6. Do the demo** in GitLab: the steps under "What the demo shows" above. `omeriko` opens the exception merge
+request; `security-lead` clicks **Approve**, then **Merge**, then **promote** in the `main` pipeline.
+
+**7. Check everything.**
+
+| What | How |
+|---|---|
+| The pipeline and the CVE | GitLab: `bank/bank` → Build → Pipelines; the `sca` job log and the **Tests** tab |
+| Signed release in Harbor | Harbor: Projects → `release` → `bank-app` and `charts/bank-app` (Signed column) |
+| Signature from the terminal | `SSL_CERT_FILE=lab-ca.crt cosign verify --key .lab/cosign.pub --insecure-ignore-tlog=true harbor.lab.internal/release/bank-app:1.0.N` (after `cosign login harbor.lab.internal -u admin`) |
+| What runs in prod | `make status` (Flux source, signature, installed version, pods) |
+| Shell on the prod server | `aws ssm start-session --target <prod instance id>`, then `sudo -i`, then `flux get sources oci -A`, `flux get helmreleases -A`, `kubectl -n bank-app get pods` |
+| Every security control | `make test` (local, no AWS) and `make test-lab` (against the lab) |
+
+**8. Again or clean up.** `make demo-reset` gives a fresh GitLab project to run the demo again (about 5 minutes).
+`make down` deletes everything. Cost while running: about $0.55 per hour.
+
+Details for every step: `BUILD_GUIDE.md`. Trade-off decisions: `DECISIONS.md`.
