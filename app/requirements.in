@@ -1,0 +1,7 @@
+# Direct dependencies only. requirements.txt is generated from this file:
+#   pip-compile --generate-hashes --output-file app/requirements.txt app/requirements.in
+pg8000==1.31.2
+# Intentionally vulnerable (assignment requirement): CVE-2022-21797, Critical (fixed in 1.2.0)
+joblib==1.1.0
+# pg8000 1.31.2 needs scramp's make_channel_binding (used for TLS logins), which scramp 1.5.0 removed.
+scramp==1.4.18
