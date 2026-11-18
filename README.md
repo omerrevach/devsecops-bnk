@@ -26,30 +26,52 @@ What was asked:
 
 ```mermaid
 flowchart LR
-  DEV["Developer"] -->|"1 push branch,<br/>open merge request"| GL
-  subgraph BUILD["Build zone (no internet)"]
-    GL["GitLab<br/>code · reviews · CI"]
-    BR["Build runner<br/>scan · build · scan image"]
-    RR["Release runner<br/>sign with KMS"]
+  DEV["Developer / Security<br/>(laptop)"]
+  REG["Public registries<br/>ghcr.io · Docker Hub · quay.io · gcr.io · cgr.dev"]
+  subgraph AWS["AWS account · eu-central-1"]
+    subgraph VPC["VPC 10.20.0.0/16 · no NAT gateway · subnet firewalls (NACLs) between zones"]
+      subgraph VPNS["vpn subnet 10.20.50.0/24"]
+        CVPN["Client VPN<br/>certificate login"]
+      end
+      subgraph PUB["public subnet 10.20.0.0/24"]
+        PROXY["Squid egress proxy<br/>domain allowlist, logged"]
+      end
+      subgraph DMZ["dmz subnets 10.20.20.0/24 + 10.20.21.0/24"]
+        ALB["Internal load balancer<br/>gitlab. / harbor.lab.internal · TLS"]
+        HARBOR["Harbor<br/>mirror · staging · release (signed only)"]
+      end
+      subgraph BUILD["build subnet 10.20.10.0/24 · no internet"]
+        GL["GitLab<br/>code · reviews · CI · PyPI registry"]
+        BR["Build runner<br/>scans · builds"]
+        RR["Release runner<br/>only main · only one that can sign"]
+      end
+      subgraph PROD["prod subnet 10.20.30.0/24 · no inbound"]
+        K3S["k3s: Flux → bank-app + Postgres"]
+      end
+      subgraph EPS["endpoints subnet 10.20.40.0/24"]
+        VPCE["VPC endpoints<br/>SSM · KMS"]
+      end
+    end
+    KMS["KMS signing key"]
+    PS["Parameter Store<br/>secrets, per-VM access"]
   end
-  SEC["Security"] -->|"2 approve, merge,<br/>approve release"| GL
-  GL --> BR
-  GL --> RR
-  BR -->|"3 push image"| STG
-  RR -->|"4 sign"| KMS["AWS KMS key"]
-  RR -->|"5 publish signed<br/>image + chart"| REL
-  subgraph DMZ["DMZ"]
-    STG["Harbor staging"]
-    REL["Harbor release<br/>signed only"]
-    MIR["Harbor mirror<br/>pinned tools + CVE DB"]
-  end
-  MIR -->|"daily, via egress proxy"| NET["Public registries"]
-  BR -.->|"tools + CVE DB"| MIR
-  subgraph PROD["Prod zone (no inbound)"]
-    FLUX["Flux"] --> APP["bank-app + Postgres<br/>on k3s"]
-  end
-  FLUX -->|"6 pull + verify signature"| REL
+
+  DEV -->|"1 VPN"| CVPN --> ALB
+  ALB --> GL
+  ALB --> HARBOR
+  GL -->|"2 jobs"| BR
+  GL -->|"2 jobs (main)"| RR
+  BR -->|"3 image to staging"| ALB
+  RR -->|"4 sign digest"| VPCE --> KMS
+  RR -->|"5 signed image + chart to release"| ALB
+  K3S -->|"6 pull + verify signature (Harbor only)"| ALB
+  HARBOR -->|"daily mirror"| PROXY --> REG
+  VPCE --> PS
 ```
+
+Arrows start at whoever opens the connection. Nothing connects into prod: it only pulls signed releases from
+Harbor through the load balancer, which lets prod reach Harbor but never GitLab. Shells on the servers go through
+AWS SSM (no SSH), and secrets live in Parameter Store, each server able to read only its own.
 
 A secure CI/CD pipeline for a small banking service. CI and production have **no internet**, every
 dependency is checked, every release is **signed** and approved by a person, and production **pulls**
