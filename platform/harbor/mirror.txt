@@ -1,0 +1,20 @@
+# Everything Harbor copies from public registries into its "mirror" project (one replication rule each).
+# Harbor refreshes them daily at 02:00 UTC. Change a version here and in .gitlab-ci.yml together.
+#
+# digest: the reviewed digest of a pinned tool image; Harbor setup fails if the mirror holds anything else.
+#         The same digests are in .gitlab-ci.yml. Change both together, through a reviewed merge request.
+#         "-" = refreshed on purpose (vulnerability DB, base images: pinned by digest at import instead).
+#
+# registry   repository                    tag          digest
+ghcr         aquasecurity/trivy-db         2            -
+dockerhub    aquasec/trivy                 0.76.2       sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
+dockerhub    bridgecrew/checkov            3.4.5        sha256:122602cf32cc72286155d39f1f234b7b594818f7b8d7fdf490701620e521368b
+dockerhub    library/python                3.13-slim    -
+cgr          chainguard/postgres           latest       -
+quay         buildah/stable                v1.45.1      sha256:3f9e38e2a93798d224b3dbed9470cf4447c8c75f1ede943d96b4c367a5227631
+gcr          distroless/python3-debian13   nonroot      -
+ghcr         sigstore/cosign/cosign        v3.1.4-dev   sha256:8af1a2cf9fba903fdfc6bdafdc25f7b13ef34ad722095543ea787fb96f7240c1
+dockerhub    alpine/helm                   4.3.2        sha256:a3b9d617c0c30a6c488cebb429c4ba83995a26dc2184599af5fd408a361b2e67
+ghcr         gitleaks/gitleaks             v8.30.1      sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+ghcr         fluxcd/source-controller      v1.10.1      sha256:611b6bca3eae95bcff471414d1fb14a4ab83d7f14e609cccef2bd389c121f37e
+ghcr         fluxcd/helm-controller        v1.7.1       sha256:54526cc6ed1202d71d44c310676448065664f3255ad671d9a69ac26f904e617a

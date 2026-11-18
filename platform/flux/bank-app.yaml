@@ -1,0 +1,112 @@
+# Applied ONCE on the prod node (Phase 12, by platform/prod/bootstrap.sh). Not part of a release.
+#
+# 1. The app namespace, with Pod Security "restricted" enforced by Kubernetes itself.
+# 2. Flux polls Harbor "release" for the newest chart, verifies its cosign signature with the
+#    public key, and only then installs it. Unsigned or tampered charts are never installed.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bank-app
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+# The identity Flux installs the app with: rights only inside bank-app, only for the kinds the chart contains.
+# No RBAC objects, no cluster-wide objects, no other namespace. (Helm keeps its release records as Secrets in
+# bank-app, so Secrets in this namespace are included.)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bank-app-deployer
+  namespace: flux-system
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: bank-app-deployer
+  namespace: bank-app
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets", "services", "serviceaccounts"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Read-only, so Flux can wait for the rollout and report health.
+  - apiGroups: [""]
+    resources: ["pods", "events", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets", "controllerrevisions"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bank-app-deployer
+  namespace: bank-app
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: bank-app-deployer
+subjects:
+  - kind: ServiceAccount
+    name: bank-app-deployer
+    namespace: flux-system
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: bank-app
+  namespace: flux-system
+spec:
+  interval: 1m
+  url: oci://harbor.lab.internal/release/charts/bank-app
+  ref:
+    semver: ">=1.0.0"          # always the highest release; an old one can't be replayed by moving a tag
+  layerSelector:
+    mediaType: "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
+    operation: copy            # hand the packaged chart to helm-controller as-is
+  secretRef:
+    name: harbor-pull          # pull-only Harbor robot account
+  certSecretRef:
+    name: harbor-ca            # trust the lab CA
+  verify:
+    provider: cosign
+    secretRef:
+      name: cosign-pub         # public half of the KMS signing key
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: bank-app
+  namespace: flux-system
+spec:
+  interval: 5m
+  releaseName: bank-app
+  serviceAccountName: bank-app-deployer   # installs with that Role's rights, nothing more
+  targetNamespace: bank-app
+  storageNamespace: bank-app
+  chartRef:
+    kind: OCIRepository
+    name: bank-app
+  # No values on purpose: everything (including the image digest) is inside the signed chart.
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+      strategy: rollback       # a failed upgrade goes back to the last good release
+  driftDetection:
+    mode: enabled              # undo manual "kubectl edit" changes to what the chart deployed
+  timeout: 5m

@@ -1,0 +1,15 @@
+# App settings. The password is not here: it is mounted as a file from a Secret.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bank-app.labels" . | nindent 4 }}
+data:
+  DB_HOST: {{ include "bank-app.dbName" . }}.{{ .Release.Namespace }}.svc.cluster.local
+  DB_PORT: "5432"
+  DB_NAME: {{ .Values.database.name | quote }}
+  DB_USER: {{ .Values.database.user | quote }}
+  DB_CA_FILE: /var/run/secrets/db-ca/ca.crt
+  PORT: "8080"

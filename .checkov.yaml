@@ -1,0 +1,12 @@
+# Checkov configuration used by the "iac-scan" CI job.
+# Every skip below is a conscious, documented risk decision for the lab.
+# Which paths and framework to scan is decided per CI job by scripts/iac-scan.sh (one framework per job),
+# so a mis-scoped config can never silently skip a framework.
+skip-download: true
+download-external-modules: false
+skip-check:
+  # Egress proxy must have a public IP to reach the internet; its SG allows no inbound from the internet.
+  - CKV_AWS_88
+  # CloudWatch log groups (flow logs, VPN) use CloudWatch's default encryption; a customer-managed key adds
+  # cost without changing the lab's risk. (Secrets do use a customer-managed key: alias/<project>-secrets.)
+  - CKV_AWS_158

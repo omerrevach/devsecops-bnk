@@ -1,0 +1,7 @@
+apiVersion: v2
+name: bank-app
+description: Internal banking service (health check + Postgres), hardened for a restricted namespace.
+type: application
+# Both versions are set by CI when the chart is packaged (helm package --version/--app-version).
+version: 0.0.0
+appVersion: "0.0.0"

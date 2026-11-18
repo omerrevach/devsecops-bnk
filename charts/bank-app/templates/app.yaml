@@ -1,0 +1,121 @@
+# The web service: Deployment + Service + PodDisruptionBudget.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bank-app.labels" . | nindent 4 }}
+    {{- include "bank-app.appSelector" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "bank-app.appSelector" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "bank-app.labels" . | nindent 8 }}
+        {{- include "bank-app.appSelector" . | nindent 8 }}
+      annotations:
+        # Restart the pods when the config changes.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ .Release.Name }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: "{{ .Values.image.repository }}@{{ .Values.image.digest }}"
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: {{ .Release.Name }}-config
+          env:
+            - name: DB_PASSWORD_FILE
+              value: /var/run/secrets/db/password
+          volumeMounts:
+            - name: db-credentials
+              mountPath: /var/run/secrets/db
+              readOnly: true
+            - name: db-ca
+              mountPath: /var/run/secrets/db-ca
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            # TCP only: a database outage must not put the app in a restart loop.
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          securityContext:
+            {{- include "bank-app.containerSecurityContext" . | nindent 12 }}
+      volumes:
+        - name: db-credentials
+          secret:
+            secretName: {{ .Values.database.passwordSecret }}
+            defaultMode: 0440
+            items:
+              - key: password
+                path: password
+        # CA that signed the database's TLS certificate (created in prod by platform/prod/bootstrap.sh).
+        - name: db-ca
+          secret:
+            secretName: {{ .Values.database.caSecret }}
+            defaultMode: 0444
+            items:
+              - key: ca.crt
+                path: ca.crt
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bank-app.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "bank-app.appSelector" . | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+# Keep at least one pod up during node maintenance.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bank-app.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "bank-app.appSelector" . | nindent 6 }}

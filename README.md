@@ -12,8 +12,7 @@
 8. [Tools and why](#tools-and-why)
 9. [Users](#users)
 10. [Repository layout, and what would differ in a real company](#repository-layout-and-what-would-differ-in-a-real-company)
-11. [Known gaps](#known-gaps)
-12. [Run it yourself: set up, log in, check everything](#run-it-yourself-set-up-log-in-check-everything)
+11. [Run it yourself: set up, log in, check everything](#run-it-yourself-set-up-log-in-check-everything)
 
 ## The assignment
 
@@ -187,13 +186,14 @@ vulnerabilities:
 The merge request pipeline is green: Trivy skips only that CVE in that exact version (another version, or any
 other Critical, still fails). It has **no signing or release jobs**, and the developer cannot merge it.
 
-**5. Four eyes, enforced.**
+**5. Two-person approval, enforced** (the person who asks for an exception cannot approve it).
 
 ![exception-approvals blocks a self-approved exception](docs/images/5-self-approval-blocked.png)
 
-On `main`, `exception-approvals` checks GitLab's own record: the change must come from a merge request approved by
-a Maintainer (Security) who is not its author. A self-approved exception, or one merged without any approval, is
-stopped here, before anything is signed.
+Before anything is signed, the `exception-approvals` job looks up who did what in GitLab: someone from Security
+must have clicked **Approve** on the merge request, and that person must be different from the developer who
+asked for the exception. If the same person asked and approved, or nobody approved at all, the pipeline stops
+here, as in this screenshot.
 
 **6. The release, approved by a person.**
 
@@ -369,6 +369,7 @@ Each point says what is enforced and how it is proven. Local tests: `make test` 
 | gitleaks | Finds secrets in code and history, offline. |
 | cosign + AWS KMS | Signing where the private key can never be copied. |
 | Helm | Packages the release; the signed chart pins the image digest. |
+| Buildah | Builds the container image from the Dockerfile, like `docker build`, but without needing Docker. Plain `docker build` inside a CI job would need the server's Docker socket or "privileged" mode, letting any job (even a merge request) take over a build server that is shared and permanent here. On cloud CI each job gets a fresh throwaway VM, so `docker build` is fine there. |
 | k3s | Certified Kubernetes in one small VM: cheap (no control-plane fee), starts in minutes, and installs fully offline from its image bundle. EKS would cost more (~$0.10/h for the control plane plus nodes), needs extra private endpoints, and adds nothing to what this assignment demonstrates; the chart and Flux setup would carry over to EKS unchanged. |
 | Flux | Pull-based: it runs inside prod and fetches releases, so prod opens no port. It **verifies cosign signatures natively** before installing, can install each release with a limited service account (least privilege), and is light (2 controllers, no UI to expose). Argo CD is a good tool too, but it is heavier, centres on a web UI and API server that must be secured, and has no built-in cosign verification of OCI charts. |
 | Chainguard PostgreSQL | Minimal database image with no Critical or High CVEs (the official images ship a vulnerable helper). |
@@ -446,24 +447,6 @@ vulnerability database, because new CVEs appear daily even when the code does no
 this folder changed" rules can silently skip a gate. The scans take seconds to a minute. In a bigger setup,
 merge requests could skip unrelated scans while `main` still runs everything before a release.
 
-## Known gaps
-
-- **Single node.** k3s and the database share one VM, and there are no backups. A bank would define RPO/RTO,
-  run the database with backups and point-in-time recovery, and test restores.
-- **Distribution-specific bootstrap.** The chart and Flux objects would carry over to EKS; the k3s bootstrap
-  (registry config, kubeconfig, local storage) would be replaced by EKS node and storage configuration.
-- **Client path.** The app is internal (ClusterIP) and checked with `kubectl port-forward`; a real deployment
-  would add an internal gateway with its own allowlist and TLS.
-- **Code owners.** GitLab's free tier does not enforce `CODEOWNERS`; four eyes comes from roles plus the
-  `exception-approvals` check of GitLab's approval record.
-- **Audit retention.** AWS keeps API events (CloudTrail event history) for 90 days and Session Manager session
-  transcripts are not recorded here; a bank would ship both, and pipeline evidence, to a central long-term store
-  with alerting (e.g. paging the feed owner when `feed-check` fails).
-- **Builds.** Buildah needs seccomp and AppArmor relaxed and `/dev/fuse` on the build runner (still not
-  privileged); production would build on dedicated, short-lived build VMs.
-- **Scripted demo.** `DEMO=auto` approves with the approvers' API tokens; it demonstrates the flow but is not
-  evidence of independent human review.
-
 ## Run it yourself: set up, log in, check everything
 
 **1. Requirements (laptop).** AWS CLI v2 with the Session Manager plugin, Terraform 1.11 or newer, Checkov, Docker,
@@ -513,4 +496,4 @@ request; `security-lead` clicks **Approve**, then **Merge**, then **promote** in
 **8. Again or clean up.** `make demo-reset` gives a fresh GitLab project to run the demo again (about 5 minutes).
 `make down` deletes everything. Cost while running: about $0.55 per hour.
 
-Details for every step: `BUILD_GUIDE.md`. Trade-off decisions: `DECISIONS.md`.
+Trade-off decisions: `DECISIONS.md`.

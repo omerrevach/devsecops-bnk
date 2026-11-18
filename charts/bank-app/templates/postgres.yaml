@@ -1,0 +1,198 @@
+# The database: config (who may log in, how), headless Service, single-replica StatefulSet.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "bank-app.dbName" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bank-app.labels" . | nindent 4 }}
+data:
+  # Only two ways in: the postgres admin over the local socket (inside this pod only), and the app's role
+  # over TLS with a password. Plaintext network logins and every other user/database are refused.
+  pg_hba.conf: |
+    local    all                         postgres                       peer
+    hostssl  {{ .Values.database.name }}  {{ .Values.database.user }}  0.0.0.0/0  scram-sha-256
+    hostssl  {{ .Values.database.name }}  {{ .Values.database.user }}  ::/0       scram-sha-256
+  # Runs once, when the database is created: the app gets a normal login that can only connect to its
+  # database. No superuser, no role or database creation, no replication, cannot bypass row security.
+  10-app-role.sh: |
+    #!/bin/sh
+    set -eu
+    psql -v ON_ERROR_STOP=1 --username postgres --dbname {{ .Values.database.name | quote }} \
+      -v app_password="$(cat /var/run/secrets/db-app/password)" <<'SQL'
+    CREATE ROLE {{ .Values.database.user }} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
+      PASSWORD :'app_password';
+    REVOKE ALL ON DATABASE {{ .Values.database.name }} FROM PUBLIC;
+    GRANT CONNECT ON DATABASE {{ .Values.database.name }} TO {{ .Values.database.user }};
+    REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+    SQL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "bank-app.dbName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bank-app.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "bank-app.dbSelector" . | nindent 4 }}
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "bank-app.dbName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bank-app.labels" . | nindent 4 }}
+    {{- include "bank-app.dbSelector" . | nindent 4 }}
+  annotations:
+    checkov.io/skip1: CKV_K8S_40=The official postgres alpine image runs as its built-in postgres user (uid 70)
+spec:
+  serviceName: {{ include "bank-app.dbName" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "bank-app.dbSelector" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "bank-app.labels" . | nindent 8 }}
+        {{- include "bank-app.dbSelector" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "bank-app.dbName" . }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: "{{ .Values.postgres.image.repository }}@{{ .Values.postgres.image.digest }}"
+          imagePullPolicy: Always
+          # TLS on, only the logins in pg_hba.conf, SCRAM passwords. (The image's entrypoint already starts
+          # "postgres"; these are its options.)
+          args:
+            - -c
+            - ssl=on
+            - -c
+            - ssl_cert_file=/var/run/secrets/db-tls/tls.crt
+            - -c
+            - ssl_key_file=/var/run/secrets/db-tls/tls.key
+            - -c
+            - ssl_min_protocol_version=TLSv1.2
+            - -c
+            - hba_file=/etc/postgres/pg_hba.conf
+            - -c
+            - password_encryption=scram-sha-256
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: {{ .Values.database.name | quote }}
+            # The admin (superuser) is "postgres"; its password is mounted only in this pod.
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_PASSWORD_FILE
+              value: /var/run/secrets/db-admin/password
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: run
+              mountPath: /var/run/postgresql
+            - name: tmp
+              mountPath: /tmp
+            - name: db-admin
+              mountPath: /var/run/secrets/db-admin
+              readOnly: true
+            - name: db-app
+              mountPath: /var/run/secrets/db-app
+              readOnly: true
+            - name: db-tls
+              mountPath: /var/run/secrets/db-tls
+              readOnly: true
+            - name: config
+              mountPath: /etc/postgres
+              readOnly: true
+            # One file into the image's init-script folder (Chainguard: /var/lib/postgres/initdb), without
+            # hiding the image's own files there.
+            - name: init
+              mountPath: /var/lib/postgres/initdb/10-app-role.sh
+              subPath: 10-app-role.sh
+              readOnly: true
+          resources:
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-h", "/tmp", "-U", "postgres"]
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-h", "/tmp", "-U", "postgres"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          securityContext:
+            {{- include "bank-app.containerSecurityContext" . | nindent 12 }}
+      volumes:
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: db-admin
+          secret:
+            secretName: {{ .Values.database.adminSecret }}
+            defaultMode: 0440
+            items:
+              - key: password
+                path: password
+        - name: db-app
+          secret:
+            secretName: {{ .Values.database.passwordSecret }}
+            defaultMode: 0440
+            items:
+              - key: password
+                path: password
+        # Postgres accepts a root-owned key only with mode 0640 or stricter.
+        - name: db-tls
+          secret:
+            secretName: {{ .Values.database.tlsSecret }}
+            defaultMode: 0440
+            items:
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
+        - name: config
+          configMap:
+            name: {{ include "bank-app.dbName" . }}-config
+            items:
+              - key: pg_hba.conf
+                path: pg_hba.conf
+        - name: init
+          configMap:
+            name: {{ include "bank-app.dbName" . }}-config
+            defaultMode: 0555
+            items:
+              - key: 10-app-role.sh
+                path: 10-app-role.sh
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.postgres.storage }}

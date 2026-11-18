@@ -1,0 +1,46 @@
+# Values are baked into the chart when CI packages it. Prod installs it with no overrides,
+# so what was signed is exactly what runs. Security settings are NOT values: they are
+# fixed in the templates so they cannot be switched off from here.
+
+replicaCount: 2
+
+image:
+  repository: harbor.lab.internal/release/bank-app
+  # Set by the CI "publish-chart" job to the digest that was scanned and signed.
+  digest: ""
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 250m
+    memory: 128Mi
+
+# Every Secret below is created inside the prod cluster by platform/prod/bootstrap.sh; none is in Git.
+database:
+  name: bank
+  # The app's login: a normal role (no superuser, cannot create roles or databases).
+  user: bank_app
+  passwordSecret: db-credentials   # key "password": the app's password (app pod + database init)
+  adminSecret: db-admin            # key "password": the postgres superuser (database pod only)
+  tlsSecret: db-tls                # tls.crt / tls.key: the database server certificate
+  caSecret: db-ca                  # ca.crt: the CA the app trusts for the database
+
+postgres:
+  image:
+    # Chainguard's minimal PostgreSQL: no Critical/High CVEs (the official images ship gosu with one).
+    repository: harbor.lab.internal/mirror/chainguard/postgres
+    # Digest of chainguard/postgres:latest in the Harbor mirror (pinned by make up at import).
+    digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  storage: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Subnet of the k3s node. Kubelet health probes come from here.
+nodeCidr: 10.20.30.0/24

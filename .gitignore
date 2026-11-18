@@ -1,0 +1,38 @@
+# Build outputs
+app/wheels/
+.trivycache/
+checkov-junit.xml
+gitleaks-report.json
+rendered/
+dist/
+*.digest
+build.env
+chart.env
+push.log
+
+# Terraform. State holds private keys (lab CA, VPN): it lives in S3, never in Git.
+# The provider lock files (.terraform.lock.hcl) ARE committed.
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+*.tfvars
+!terraform.tfvars.example
+terraform/backend.hcl
+crash.log
+
+# Local secrets / certs
+lab-ca.crt
+*.ovpn
+*.pem
+*.key
+.env
+
+# Python
+__pycache__/
+.venv/
+
+# make up: your settings and its working files (logs, bundle, public key)
+lab.env
+.lab/

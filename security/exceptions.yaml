@@ -1,0 +1,17 @@
+# Approved risk-acceptance exceptions, in Trivy's native ignore-file format.
+#
+# Rules (enforced by scripts/check_exceptions.py in the "exceptions-lint" job):
+#   - one entry = one CVE in one exact package version (use purls)
+#   - expired_at is mandatory and at most 30 days in the future
+#   - statement must contain: ticket=..., approved-by=..., reason=...
+#   - changes to this file require Security code-owner approval (CODEOWNERS)
+#
+# Trivy stops honouring an entry automatically after expired_at.
+#
+# Example (add via merge request, approved by @bank/security):
+#   - id: CVE-2022-21797
+#     purls:
+#       - "pkg:pypi/joblib@1.1.0"
+#     expired_at: 2026-12-15
+#     statement: "ticket=SEC-101; approved-by=security-lead; reason=Parallel(pre_dispatch) never receives user input; compensating=no joblib code path reachable from HTTP"
+vulnerabilities: []

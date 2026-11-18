@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "bank-app values",
+  "type": "object",
+  "required": ["replicaCount", "image", "resources", "database", "postgres", "nodeCidr"],
+  "definitions": {
+    "digest": {
+      "description": "Images are always pinned by digest, never by tag.",
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "harborImage": {
+      "type": "string",
+      "pattern": "^harbor\\.lab\\.internal/"
+    }
+  },
+  "properties": {
+    "replicaCount": { "type": "integer", "minimum": 1 },
+    "image": {
+      "type": "object",
+      "required": ["repository", "digest"],
+      "properties": {
+        "repository": { "$ref": "#/definitions/harborImage" },
+        "digest": { "$ref": "#/definitions/digest" }
+      }
+    },
+    "resources": { "type": "object", "required": ["requests", "limits"] },
+    "database": {
+      "type": "object",
+      "required": ["name", "user", "passwordSecret", "adminSecret", "tlsSecret", "caSecret"]
+    },
+    "postgres": {
+      "type": "object",
+      "required": ["image", "storage", "resources"],
+      "properties": {
+        "image": {
+          "type": "object",
+          "required": ["repository", "digest"],
+          "properties": {
+            "repository": { "$ref": "#/definitions/harborImage" },
+            "digest": { "$ref": "#/definitions/digest" }
+          }
+        },
+        "resources": { "type": "object", "required": ["requests", "limits"] }
+      }
+    },
+    "nodeCidr": { "type": "string" }
+  }
+}
