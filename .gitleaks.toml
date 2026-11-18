@@ -2,7 +2,7 @@
 # It uses gitleaks' built-in rules, which ship inside the binary: no internet access needed.
 #
 # Only add an allowlist entry for a confirmed false positive, with a comment saying why.
-# Changes to this file need Security approval (CODEOWNERS).
+# Only Security can merge changes to this file to main.
 title = "bank"
 
 [extend]

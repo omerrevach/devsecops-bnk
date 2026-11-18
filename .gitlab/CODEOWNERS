@@ -1,9 +1,0 @@
-# Security must approve risk acceptances and any change to the gates themselves.
-/security/          @bank/security
-/.gitlab-ci.yml     @bank/security
-/.checkov.yaml      @bank/security
-/.gitleaks.toml     @bank/security
-# The hardening (security contexts, NetworkPolicies) lives in the chart templates.
-/charts/bank-app/templates/  @bank/security
-/charts/bank-app/values.schema.json  @bank/security
-/scripts/           @bank/security

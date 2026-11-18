@@ -87,7 +87,7 @@ if [ -z "$mr" ]; then
   expiry=$(date -u -d '+14 days' +%F)
   content=$(cat <<EOF
 # Approved risk-acceptance exceptions, in Trivy's native ignore-file format.
-# Rules: scripts/check_exceptions.py (exceptions-lint job). Changes need Security approval (CODEOWNERS).
+# Rules: scripts/check_exceptions.py (exceptions-lint job). Changes need Security approval (exception-approvals job).
 vulnerabilities:
   - id: CVE-2022-21797
     purls:

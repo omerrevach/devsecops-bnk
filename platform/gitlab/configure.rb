@@ -51,7 +51,7 @@ users = { 'omeriko' => 'Omer (developer)', 'security-lead' => 'Security Lead' }.
   [username, user]
 end
 
-# 4. Groups: "bank", and "bank/security" whose members approve security changes (CODEOWNERS).
+# 4. Groups: "bank", and "bank/security" whose members approve and merge security changes.
 bank = Group.find_by_full_path('bank') || created(Groups::CreateService.new(ADMIN, {
   name: 'bank', path: 'bank', visibility_level: PRIVATE, organization_id: ORG_ID
 }).execute, :group)

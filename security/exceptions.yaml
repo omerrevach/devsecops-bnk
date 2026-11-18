@@ -4,7 +4,7 @@
 #   - one entry = one CVE in one exact package version (use purls)
 #   - expired_at is mandatory and at most 30 days in the future
 #   - statement must contain: ticket=..., approved-by=..., reason=...
-#   - changes to this file require Security code-owner approval (CODEOWNERS)
+#   - changes to this file need approval from Security (checked by the exception-approvals job)
 #
 # Trivy stops honouring an entry automatically after expired_at.
 #
