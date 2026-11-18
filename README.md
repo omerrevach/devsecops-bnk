@@ -12,8 +12,7 @@
 8. [Tools and why](#tools-and-why)
 9. [Users](#users)
 10. [Repository layout, and what would differ in a real company](#repository-layout-and-what-would-differ-in-a-real-company)
-11. [Known gaps](#known-gaps)
-12. [Run it yourself: set up, log in, check everything](#run-it-yourself-set-up-log-in-check-everything)
+11. [Run it yourself: set up, log in, check everything](#run-it-yourself-set-up-log-in-check-everything)
 
 ## The assignment
 
@@ -447,26 +446,6 @@ tests/         negative tests that prove each control                         ->
 vulnerability database, because new CVEs appear daily even when the code does not change, and "only run when
 this folder changed" rules can silently skip a gate. The scans take seconds to a minute. In a bigger setup,
 merge requests could skip unrelated scans while `main` still runs everything before a release.
-
-## Known gaps
-
-- **Single node.** k3s and the database share one VM, and there are no backups. A bank would define RPO/RTO,
-  run the database with backups and point-in-time recovery, and test restores.
-- **Distribution-specific bootstrap.** The chart and Flux objects would carry over to EKS; the k3s bootstrap
-  (registry config, kubeconfig, local storage) would be replaced by EKS node and storage configuration.
-- **Client path.** The app is internal (ClusterIP) and checked with `kubectl port-forward`; a real deployment
-  would add an internal gateway with its own allowlist and TLS.
-- **Approval rules.** GitLab can force "Security must approve changes to this file" (a `CODEOWNERS` file), but only
-  in its paid version. The lab uses the free version, so two-person approval is enforced another way: developers
-  cannot merge into `main`, and the `exception-approvals` job checks that someone other than the author approved.
-- **Audit retention.** AWS keeps API events (CloudTrail event history) for 90 days and Session Manager session
-  transcripts are not recorded here; a bank would ship both, and pipeline evidence, to a central long-term store
-  with alerting (e.g. paging the feed owner when `feed-check` fails).
-- **Image builds.** The container image is built inside a locked-down CI container, and the build tool (Buildah)
-  needs a few of those default restrictions loosened on the build server to work. It still gets no admin rights.
-  A real company would build images on separate, throwaway build machines instead.
-- **Scripted demo.** `DEMO=auto` approves with the approvers' API tokens; it demonstrates the flow but is not
-  evidence of independent human review.
 
 ## Run it yourself: set up, log in, check everything
 
