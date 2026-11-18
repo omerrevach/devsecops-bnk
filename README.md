@@ -7,12 +7,13 @@
 3. [How it works](#how-it-works)
 4. [The pipeline](#the-pipeline)
 5. [What the demo shows, with screenshots](#what-the-demo-shows-step-by-step)
-6. [Security considerations](#security-considerations)
-7. [Tools and why](#tools-and-why)
-8. [Users](#users)
-9. [Repository layout, and what would differ in a real company](#repository-layout-and-what-would-differ-in-a-real-company)
-10. [Known gaps](#known-gaps)
-11. [Run it yourself: set up, log in, check everything](#run-it-yourself-set-up-log-in-check-everything)
+6. [How outside content stays up to date](#how-outside-content-stays-up-to-date-and-under-control)
+7. [Security considerations](#security-considerations)
+8. [Tools and why](#tools-and-why)
+9. [Users](#users)
+10. [Repository layout, and what would differ in a real company](#repository-layout-and-what-would-differ-in-a-real-company)
+11. [Known gaps](#known-gaps)
+12. [Run it yourself: set up, log in, check everything](#run-it-yourself-set-up-log-in-check-everything)
 
 ## The assignment
 
@@ -256,6 +257,44 @@ ref:
 
 Only the pipeline's release jobs can put charts into `release`, and only after Security's approval; release
 versions can never be overwritten, and an older version can't be "replayed" because Flux always takes the highest.
+
+## How outside content stays up to date (and under control)
+
+Only the vulnerability database updates itself. Every tool, base image and Python package is pinned and changes
+only through a reviewed merge request.
+
+**1. The Trivy vulnerability database: refreshed every day, automatically.**
+- Harbor has one replication rule per image, created by `platform/harbor/configure.sh` from the list in
+  `platform/harbor/mirror.txt`, each on a daily schedule (02:00 UTC).
+- At that time Harbor pulls `ghcr.io/aquasecurity/trivy-db:2` through the egress proxy. Harbor is the only server
+  allowed out, and only to the feed registries on its allowlist.
+- Aqua republishes that database several times a day under the same tag (`2`), so each daily run brings in the
+  latest CVE data.
+- In CI, every scan job downloads it from Harbor, never from the internet, and `feed-check` stops the pipeline if
+  it is older than 48 hours. If the daily refresh breaks, pipelines fail closed instead of scanning with old data.
+
+**2. CI tools (Trivy, Checkov, gitleaks, Helm, Buildah, cosign) and the Flux images: pinned, never change by
+themselves.**
+- They are mirrored by the same daily rules, but each is pinned to an exact version and digest, in both
+  `platform/harbor/mirror.txt` and `.gitlab-ci.yml`.
+- Harbor setup fails if a mirrored tool does not match its reviewed digest, and CI pulls by digest, so a daily
+  refresh can never swap in a different scanner.
+- To upgrade one: change the version and digest in those two files through a merge request, Security reviews it,
+  and the mirror picks it up.
+
+**3. Base images (Python, distroless, Chainguard PostgreSQL): mirrored daily, used only when pinned.**
+- Their tags are refreshed daily in the mirror, so security patches arrive there.
+- The Dockerfile and the chart use them by digest, pinned when the code is imported. A newer base image is used
+  only after a reviewed change bumps the digest, and it is scanned again (`image-scan`) before any release.
+
+**4. Python packages: no automatic updates, by design.**
+- They do not come through Harbor but through a one-time intake (`platform/gitlab/intake.sh`, run by `make up`):
+  the exact versions in `app/requirements.txt` are downloaded, checked against their SHA-256 hashes, and uploaded
+  to GitLab's internal package registry.
+- CI installs only from that registry, with `--require-hashes`; forwarding to pypi.org is turned off.
+- To update a package: change `app/requirements.in`, regenerate `requirements.txt` with hashes
+  (`pip-compile --generate-hashes`), open a merge request (the dependency scan checks the new versions), and after
+  the merge re-run the intake (`make up`).
 
 ## Security considerations
 
