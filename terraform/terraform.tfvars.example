@@ -1,0 +1,6 @@
+# Copy to terraform.tfvars (git-ignored) and adjust. Every value here is optional.
+region  = "eu-central-1"
+project = "bank-lab"
+
+# Turn the Client VPN off when you are not using it (it bills per hour, even with VMs stopped).
+enable_client_vpn = true

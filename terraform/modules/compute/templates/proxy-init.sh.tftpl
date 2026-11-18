@@ -1,0 +1,21 @@
+#!/bin/bash
+# Egress proxy: deny-by-default, per-zone domain allowlists.
+set -euo pipefail
+hostnamectl set-hostname proxy
+apt-get update -y
+DEBIAN_FRONTEND=noninteractive apt-get install -y squid
+
+mkdir -p /etc/squid/allow
+cat > /etc/squid/allow/harbor-feeds.txt <<'EOF_FEEDS'
+${harbor_domains}
+EOF_FEEDS
+cat > /etc/squid/allow/bootstrap.txt <<'EOF_BOOT'
+${bootstrap_domains}
+EOF_BOOT
+cat > /etc/squid/squid.conf <<'EOF_SQUID'
+${squid_conf}
+EOF_SQUID
+
+squid -k parse
+systemctl enable squid
+systemctl restart squid

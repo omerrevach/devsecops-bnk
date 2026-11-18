@@ -1,0 +1,32 @@
+# Egress proxy for the lab. Deny by default; allow named domains per source zone.
+http_port 3128
+
+acl net_build src ${build_cidr}
+acl net_dmz   src ${dmz_cidr}
+acl net_prod  src ${prod_cidr}
+acl lab_zones src ${build_cidr} ${dmz_cidr} ${prod_cidr}
+
+acl SSL_ports port 443
+acl Safe_ports port 80 443
+acl CONNECT method CONNECT
+
+acl harbor_feeds dstdomain "/etc/squid/allow/harbor-feeds.txt"
+acl bootstrap    dstdomain "/etc/squid/allow/bootstrap.txt"
+
+http_access deny !Safe_ports
+http_access deny CONNECT !SSL_ports
+
+# PERMANENT: Harbor (DMZ) may replicate vulnerability feeds and images.
+http_access allow net_dmz harbor_feeds
+
+# TEMPORARY: installers during first setup. Closed in Phase 12 by emptying bootstrap.txt.
+http_access allow lab_zones bootstrap
+
+http_access deny all
+
+# No caching, no identifying headers, full access log for audit.
+cache deny all
+via off
+forwarded_for delete
+access_log daemon:/var/log/squid/access.log squid
+visible_hostname proxy

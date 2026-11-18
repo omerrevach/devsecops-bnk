@@ -1,0 +1,30 @@
+#!/bin/bash
+# First-boot setup for every internal VM (no internet route exists; only the proxy).
+set -euo pipefail
+hostnamectl set-hostname ${hostname}
+
+# Trust the lab CA (GitLab + Harbor TLS).
+mkdir -p /etc/lab-ca
+cat > /etc/lab-ca/ca.crt <<'EOF_CA'
+${ca_cert}
+EOF_CA
+cp /etc/lab-ca/ca.crt /usr/local/share/ca-certificates/lab-ca.crt
+update-ca-certificates
+# Public CAs + lab CA in one file: mounted read-only into CI job containers.
+cp /etc/ssl/certs/ca-certificates.crt /etc/lab-ca/ca-bundle.crt
+
+# Outbound HTTP(S) goes through the egress proxy. AWS APIs (VPC endpoints) and *.${domain} go direct.
+cat > /etc/apt/apt.conf.d/95proxy <<'EOF_APT'
+Acquire::http::Proxy "${proxy_url}";
+Acquire::https::Proxy "${proxy_url}";
+EOF_APT
+
+cat > /etc/profile.d/lab-proxy.sh <<'EOF_PROXY'
+export http_proxy=${proxy_url}
+export https_proxy=${proxy_url}
+export HTTP_PROXY=${proxy_url}
+export HTTPS_PROXY=${proxy_url}
+export no_proxy=localhost,127.0.0.1,169.254.169.254,.${domain},.${region}.amazonaws.com
+export NO_PROXY=localhost,127.0.0.1,169.254.169.254,.${domain},.${region}.amazonaws.com
+export AWS_DEFAULT_REGION=${region}
+EOF_PROXY
