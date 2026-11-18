@@ -2,7 +2,7 @@
 
 ## 1. Stale feeds: fail open or fail closed?
 
-Fail closed: if the vulnerability database is missing or older than 48 hours, the pipeline stops and no new release is built (`scripts/feed-check.sh`). A scan with an old database can miss the newest CVEs, and in a bank it is better to delay a release than to ship something that was not properly checked. The version already running in production is not affected, so the only impact is a delayed release until the mirror is fixed.
+Fail closed: if the vulnerability database is missing or older than 48 hours, the pipeline stops and no new release is built (`scripts/feed-check.sh`). A scan with an old database can miss the newest CVEs, and in a bank it is better to delay a release than to ship something that was not properly checked, while the version already running in production is not affected. In this lab it blocks on every branch; in a real team I would show it as an orange warning on feature branches so developers are not stuck, and keep it blocking on `main` and releases, so nothing reaches production without a fresh scan.
 
 ## 2. Legacy VM in an Active Directory domain
 
