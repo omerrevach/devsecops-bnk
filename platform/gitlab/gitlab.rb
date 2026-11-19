@@ -1,4 +1,4 @@
-# Complete /etc/gitlab/gitlab.rb. Installed by platform/gitlab/install.sh (Phase 5).
+# Complete /etc/gitlab/gitlab.rb. Installed by platform/gitlab/install.sh.
 # After changing it, run install.sh again: it copies this file and runs gitlab-ctl reconfigure.
 external_url 'https://gitlab.lab.internal'
 letsencrypt['enable'] = false

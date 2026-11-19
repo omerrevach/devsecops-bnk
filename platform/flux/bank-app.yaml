@@ -1,4 +1,4 @@
-# Applied ONCE on the prod node (Phase 12, by platform/prod/bootstrap.sh). Not part of a release.
+# Applied ONCE on the prod node (by platform/prod/bootstrap.sh). Not part of a release.
 #
 # 1. The app namespace, with Pod Security "restricted" enforced by Kubernetes itself.
 # 2. Flux polls Harbor "release" for the newest chart, verifies its cosign signature with the

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Installs GitLab on the gitlab VM. Safe to run again.
 #
-# Run it from the laptop (repo root), Phase 5:
+# Run it from the laptop (repo root):
 #   scripts/ssm-run.sh gitlab platform/gitlab/install.sh platform/gitlab/gitlab.rb
 #
 # Before running: the proxy's bootstrap allowlist is still open (packages come through it).
