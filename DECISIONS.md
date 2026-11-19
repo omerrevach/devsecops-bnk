@@ -6,7 +6,7 @@ Fail closed: if the vulnerability database is missing or older than 48 hours, th
 
 ## 2. Legacy VM in an Active Directory domain
 
-I would keep the pull model by installing a small agent on the VM that pulls the release from Harbor and checks its cosign signature before installing it. The agent runs under a dedicated AD service account with only the rights it needs to update this one service (a gMSA on Windows so AD rotates the password, or a rotated keytab on Linux). The CI runner never gets credentials in the production domain, and no inbound connection to the VM is needed.
+I would use the same pull idea as Flux: a small agent installed on the VM checks Harbor for a new release, verifies its cosign signature and installs it, so the CI runner never connects to the server. The agent logs in with its own AD service account that can only update this one app, and on Windows that account is a gMSA, so AD creates and rotates the password and nobody ever stores or sees it (on Linux, a service account key file that is rotated regularly). The pipeline never gets any login in the production domain, and every install is logged so we can see what was deployed and when.
 
 ## 3. Critical CVE in a transitive dependency with no fix
 
